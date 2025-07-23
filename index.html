@@ -2,20 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ERCOT Daily Line Chart</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Daily Line Chart for ERCOT &amp; PJM</title>
+  <script src="https://code.highcharts.com/highcharts.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 2rem; background: #f9f9f9; color: #333; }
-    .controls { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center; }
+    .controls { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center; flex-wrap: wrap; }
     label { font-size: 0.9rem; }
     select, input[type=date] { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
     #loading, #error { font-style: italic; color: #666; }
     #error { color: #c00; }
-    canvas { background: #fff; border: 1px solid #ddd; border-radius: 4px; }
+    #chart-container { width: 100%; height: 400px; margin-top: 1rem; display: none; }
   </style>
 </head>
 <body>
-  <h1>ERCOT Daily Line Chart</h1>
+  <h1>Daily Line Chart for ERCOT &amp; PJM</h1>
   <div class="controls">
     <label>
       Select Date:
@@ -24,115 +24,214 @@
     <label>
       Select Value:
       <select id="value-selector">
-        <option value="internal_generation">Internal Generation (MW)</option>
-        <option value="estimated_cp_load">Estimated CP Load (MW)</option>
-        <option value="estimated_cp_load_using_gen">Estimated CP Load Using Gen (MW)</option>
+        <optgroup label="ERCOT">
+          <option value="internal_generation">Internal Generation (MW)</option>
+          <option value="estimated_cp_load">Estimated CP Load (MW)</option>
+          <option value="estimated_cp_load_using_gen">Estimated CP Load Using Gen (MW)</option>
+        </optgroup>
+        <optgroup label="PJM Zones">
+          <option value="load.pjm_rto">PJM RTO Load (MW)</option>
+          <option value="load.comed">COMED Load (MW)</option>
+          <option value="load.ae">AECO Load (MW)</option>
+          <option value="load.aep">AEP Load (MW)</option>
+          <option value="load.dpl">DPL Load (MW)</option>
+          <option value="load.ps">PSEG Load (MW)</option>
+          <option value="load.pe">PECO Load (MW)</option>
+          <option value="load.bc">BGE Load (MW)</option>
+          <option value="load.pl">PPL Load (MW)</option>
+        </optgroup>
       </select>
+    </label>
+    <label>
+      <input type="checkbox" id="include-peak" />
+      Include current peak
     </label>
   </div>
   <div id="loading">Loading data…</div>
   <div id="error" style="display:none;"></div>
-  <canvas id="line-chart" width="800" height="400" style="display:none;"></canvas>
+  <div id="chart-container"></div>
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const API_KEY = 'bda3a30f30804e22a62e4637700bab54';
       const dateInput = document.getElementById('date-picker');
       const valueSelect = document.getElementById('value-selector');
+      const includePeakCb = document.getElementById('include-peak');
       const loadingEl = document.getElementById('loading');
       const errorEl = document.getElementById('error');
-      const canvas = document.getElementById('line-chart');
-      const ctx = canvas.getContext('2d');
+      const chartContainer = document.getElementById('chart-container');
       let chart;
 
       // initialize date picker to today
-      const today = new Date().toISOString().substr(0,10);
-      dateInput.value = today;
+      dateInput.value = new Date().toISOString().slice(0,10);
 
-      // fetch & render whenever controls change
-      dateInput.addEventListener('change', updateChart);
-      valueSelect.addEventListener('change', updateChart);
-
+      [dateInput, valueSelect, includePeakCb].forEach(el =>
+        el.addEventListener('change', updateChart)
+      );
       updateChart();
+
+      async function fetchJSON(url) {
+        const r = await fetch(url, { headers: { 'x-api-key': API_KEY } });
+        if (!r.ok) throw new Error(r.statusText);
+        return r.json();
+      }
+
+      async function computePeak(field, date) {
+        const isPJM = field.startsWith('load.');
+        if (isPJM) {
+          const year = new Date(date).getFullYear();
+          const url = `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query`
+                    + `?start_time=${year}-06-01T00%3A00%3A00`
+                    + `&end_time=${year}-10-01T00%3A00%3A00`
+                    + `&timezone=market`;
+          const resp = await fetchJSON(url);
+          const arr = resp.data || [];
+          // daily max per non-weekend
+          const byDay = {};
+          arr.forEach(d => {
+            const dt = new Date(d.interval_end_local);
+            const dow = dt.getUTCDay();
+            if (dow === 0 || dow === 6) return;
+            const day = dt.toISOString().slice(0,10);
+            const val = d[field];
+            if (val != null) byDay[day] = Math.max(byDay[day]||0, val);
+          });
+          const dailyMaxes = Object.values(byDay).sort((a,b)=>b-a);
+          return dailyMaxes[4] != null
+            ? dailyMaxes[4]
+            : dailyMaxes[dailyMaxes.length-1] || 0;
+        } else {
+          const dt = new Date(date);
+          const month = String(dt.getMonth()+1).padStart(2,'0');
+          const year = dt.getFullYear();
+          const start = `${year}-${month}-01T00%3A00%3A00`;
+          const next = new Date(year, dt.getMonth()+1, 1);
+          const endDate = new Date(next - 1);
+          const end = `${endDate.toISOString().slice(0,10)}T23%3A59%3A59`;
+          const url = `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query`
+                    + `?start_time=${start}&end_time=${end}&timezone=market`;
+          const resp = await fetchJSON(url);
+          const arr = resp.data || [];
+          const vals = arr.map(d=>d[field]).filter(v=>v!=null);
+          return Math.max(...vals,0);
+        }
+      }
 
       function updateChart() {
         const date = dateInput.value;
         const field = valueSelect.value;
-
         if (!date || !field) return;
 
         loadingEl.style.display = '';
         errorEl.style.display = 'none';
-        canvas.style.display = 'none';
+        chartContainer.style.display = 'none';
 
+        const isPJM = field.startsWith('load.');
+        const dataset = isPJM
+          ? 'pjm_standardized_hourly'
+          : 'ercot_estimated_coincident_peak_load';
         const start = `${date}T00:00:00`;
         const end   = `${date}T23:59:59`;
-        const url = `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query`
+        const url = `https://api.gridstatus.io/v1/datasets/${dataset}/query`
                   + `?start_time=${encodeURIComponent(start)}`
                   + `&end_time=${encodeURIComponent(end)}`
                   + `&timezone=market`;
 
-        fetch(url, { headers: { 'x-api-key': API_KEY } })
-          .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+        fetchJSON(url)
           .then(resp => {
             const data = resp.data || [];
-            // filter out entries missing the selected field
+            const tzLabel = isPJM ? 'ET' : 'CT';
+            const tz = isPJM ? 'America/New_York' : 'America/Chicago';
             const filtered = data.filter(d => d[field] != null);
-            if (!filtered.length) {
-              throw new Error('No data for selected date/field');
-            }
-            // sort by interval_end_local
-            filtered.sort((a,b) =>
-              new Date(a.interval_end_local) - new Date(b.interval_end_local)
-            );
-            const labels = filtered.map(d => {
+            if (!filtered.length) throw new Error('No data for selected date/field');
+
+            // map time label → value
+            const timeMap = {};
+            filtered.forEach(d => {
               const dt = new Date(d.interval_end_local);
-              return dt.toLocaleTimeString('en-US', {
-                timeZone: 'America/Chicago',
+              const label = dt.toLocaleTimeString('en-US', {
+                timeZone: tz,
                 hour12: true,
                 hour: '2-digit',
                 minute: '2-digit'
               });
+              timeMap[label] = d[field];
             });
-            const values = filtered.map(d => d[field]);
+
+            // generate full-day 15-min categories from 00:15 to 24:00
+            const categories = [];
+            for (let i = 1; i <= 96; i++) {
+              const totalMin = i * 15;
+              let hrs = Math.floor(totalMin / 60);
+              const mins = totalMin % 60;
+              let displayH = hrs === 24 ? 0 : hrs;
+              const ampm = hrs < 12 || hrs === 24 ? 'AM' : 'PM';
+              let h12 = displayH % 12;
+              if (h12 === 0) h12 = 12;
+              const hh = String(h12).padStart(2, '0');
+              const mm = String(mins).padStart(2, '0');
+              categories.push(`${hh}:${mm} ${ampm}`);
+            }
+
+            // values aligned to categories
+            const values = categories.map(cat =>
+              timeMap[cat] != null ? timeMap[cat] : null
+            );
 
             loadingEl.style.display = 'none';
-            canvas.style.display = '';
+            chartContainer.style.display = '';
 
-            const datasetLabel = valueSelect.selectedOptions[0].text;
-            if (chart) {
-              chart.data.labels = labels;
-              chart.data.datasets[0].data = values;
-              chart.data.datasets[0].label = datasetLabel;
-              chart.update();
-            } else {
-              chart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                  labels,
-                  datasets: [{
-                    label: datasetLabel,
-                    data: values,
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.3
-                  }]
-                },
-                options: {
-                  scales: {
-                    x: { display: true, title: { display: true, text: 'Time (CT)' } },
-                    y: { display: true, title: { display: true, text: 'MW' } }
-                  },
-                  plugins: {
-                    legend: { display: true }
-                  }
+            const seriesName = valueSelect.selectedOptions[0].text;
+            const config = {
+              chart: { type: 'line', renderTo: 'chart-container' },
+              title: { text: `${seriesName} on ${date}` },
+              xAxis: {
+                categories,
+                title: { text: `Time (${tzLabel})` }
+              },
+              yAxis: {
+                title: { text: 'MW' },
+                plotLines: []
+              },
+              tooltip: {
+                formatter() {
+                  return `<b>${this.x} (interval ending)</b><br/>`
+                    + `${this.series.name}: `
+                    + Highcharts.numberFormat(this.y, 3) + ' MW';
                 }
+              },
+              series: [{ name: seriesName, data: values }],
+              credits: { enabled: false }
+            };
+
+            if (!chart) {
+              chart = Highcharts.chart(config);
+            } else {
+              chart.update(config, true, true);
+            }
+
+            if (includePeakCb.checked) {
+              computePeak(field, date).then(peakVal => {
+                chart.yAxis[0].removePlotLine('peak-line');
+                chart.yAxis[0].addPlotLine({
+                  id: 'peak-line',
+                  value: peakVal,
+                  color: 'red',
+                  dashStyle: 'ShortDash',
+                  width: 2,
+                  label: {
+                    text: `Current Peak: ${Highcharts.numberFormat(peakVal,3)} MW`,
+                    align: 'right', x: -10
+                  }
+                });
               });
+            } else {
+              chart.yAxis[0].removePlotLine('peak-line');
             }
           })
           .catch(err => {
             loadingEl.style.display = 'none';
-            canvas.style.display = 'none';
+            chartContainer.style.display = 'none';
             errorEl.innerText = 'Error: ' + err.message;
             errorEl.style.display = '';
           });
