@@ -81,7 +81,6 @@
     async function computePeak(field, date) {
       const isPJM = field.startsWith('load.');
       if (isPJM) {
-        // PJM: 5th highest daily max across non-weekends (June 1–Oct 1)
         const year = new Date(date).getFullYear();
         const resp = await fetchJSON(
           `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query`
@@ -93,16 +92,14 @@
         const byDay = {};
         arr.forEach(d => {
           const dt = new Date(d.interval_end_local);
-          const dow = dt.getUTCDay();
-          if (dow===0||dow===6) return;
+          if ([0,6].includes(dt.getUTCDay())) return;
           const day = dt.toISOString().slice(0,10);
           const val = d[field];
-          if (val!=null) byDay[day] = Math.max(byDay[day]||0, val);
+          if (val != null) byDay[day] = Math.max(byDay[day]||0, val);
         });
         const maxes = Object.values(byDay).sort((a,b)=>b-a);
         return maxes[4] != null ? maxes[4] : (maxes.pop()||0);
       } else {
-        // ERCOT: highest in selected month
         const dt = new Date(date);
         const month = String(dt.getMonth()+1).padStart(2,'0');
         const year = dt.getFullYear();
@@ -146,7 +143,7 @@
         const filtered = data.filter(d=>d[field]!=null);
         if (!filtered.length) throw new Error('No data for selected date/field');
 
-        // map interval_end_local → value
+        // build a map of "HH:MM AM/PM" → value
         const timeMap = {};
         filtered.forEach(d=>{
           const dt = new Date(d.interval_end_local);
@@ -157,7 +154,7 @@
           timeMap[label] = d[field];
         });
 
-        // build full-day 15-min categories from 00:15 to 24:00 based on selected date
+        // generate full-day categories 00:15–24:00 based on selected date in UTC
         const categories = [];
         for (let i=1; i<=96; i++){
           const totalMin = i*15;
@@ -165,7 +162,8 @@
           const mins = totalMin%60;
           const hh = String(hrs).padStart(2,'0');
           const mm = String(mins).padStart(2,'0');
-          const iso = `${date}T${hh}:${mm}:00`;
+          // treat as UTC so timezone conversion to CT/ET is correct
+          const iso = `${date}T${hh}:${mm}:00Z`;
           const dt = new Date(iso);
           const label = dt.toLocaleTimeString('en-US',{
             timeZone: tz,
@@ -179,7 +177,7 @@
         );
 
         loadingEl.style.display = 'none';
-        canvas.style.display = '';
+        canvas.style.display = 'block';
 
         const seriesName = valueSelect.selectedOptions[0].text;
         const baseDataset = {
@@ -192,7 +190,7 @@
           spanGaps: true
         };
 
-        const drawChart = datasets => {
+        function draw(datasets) {
           if (chart) {
             chart.data.labels = categories;
             chart.data.datasets = datasets;
@@ -222,7 +220,7 @@
               }
             });
           }
-        };
+        }
 
         if (includePeakCb.checked) {
           computePeak(field, date).then(peakVal => {
@@ -235,12 +233,12 @@
               pointRadius: 0,
               fill: false
             };
-            drawChart([baseDataset, peakDataset]);
+            draw([baseDataset, peakDataset]);
           }).catch(()=>{
-            drawChart([baseDataset]);
+            draw([baseDataset]);
           });
         } else {
-          drawChart([baseDataset]);
+          draw([baseDataset]);
         }
       })
       .catch(err => {
