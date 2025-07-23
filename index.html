@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Daily Line Chart for ERCOT &amp; PJM</title>
-  <script src="https://code.highcharts.com/highcharts.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 2rem; background: #f9f9f9; color: #333; }
     .controls { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center; flex-wrap: wrap; }
@@ -11,7 +11,7 @@
     select, input[type=date] { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
     #loading, #error { font-style: italic; color: #666; }
     #error { color: #c00; }
-    #chart-container { width: 100%; height: 400px; margin-top: 1rem; display: none; }
+    canvas { background: #fff; border: 1px solid #ddd; border-radius: 4px; display: none; }
   </style>
 </head>
 <body>
@@ -49,7 +49,7 @@
   </div>
   <div id="loading">Loading data…</div>
   <div id="error" style="display:none;"></div>
-  <div id="chart-container"></div>
+  <canvas id="line-chart" width="800" height="400"></canvas>
 
   <script>
   document.addEventListener('DOMContentLoaded', () => {
@@ -59,15 +59,12 @@
     const includePeakCb = document.getElementById('include-peak');
     const loadingEl = document.getElementById('loading');
     const errorEl = document.getElementById('error');
-    const chartContainer = document.getElementById('chart-container');
+    const canvas = document.getElementById('line-chart');
+    const ctx = canvas.getContext('2d');
     let chart;
 
-    // initialize date picker to today
     dateInput.value = new Date().toISOString().slice(0,10);
-
-    [dateInput, valueSelect, includePeakCb].forEach(el =>
-      el.addEventListener('change', updateChart)
-    );
+    [dateInput, valueSelect, includePeakCb].forEach(el => el.addEventListener('change', updateChart));
     updateChart();
 
     async function fetchJSON(url) {
@@ -80,11 +77,12 @@
       const isPJM = field.startsWith('load.');
       if (isPJM) {
         const year = new Date(date).getFullYear();
-        const url = `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query`
-                  + `?start_time=${year}-06-01T00%3A00%3A00`
-                  + `&end_time=${year}-10-01T00%3A00%3A00`
-                  + `&timezone=market`;
-        const resp = await fetchJSON(url);
+        const resp = await fetchJSON(
+          `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query`
+          + `?start_time=${year}-06-01T00%3A00%3A00`
+          + `&end_time=${year}-10-01T00%3A00%3A00`
+          + `&timezone=market`
+        );
         const arr = resp.data || [];
         const byDay = {};
         arr.forEach(d => {
@@ -103,13 +101,14 @@
         const dt = new Date(date);
         const month = String(dt.getMonth()+1).padStart(2,'0');
         const year = dt.getFullYear();
-        const start = `${year}-${month}-01T00%3A00%3A00`;
         const next = new Date(year, dt.getMonth()+1, 1);
         const endDate = new Date(next - 1);
-        const end = `${endDate.toISOString().slice(0,10)}T23%3A59%3A59`;
-        const url = `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query`
-                  + `?start_time=${start}&end_time=${end}&timezone=market`;
-        const resp = await fetchJSON(url);
+        const resp = await fetchJSON(
+          `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query`
+          + `?start_time=${year}-${month}-01T00%3A00%3A00`
+          + `&end_time=${endDate.toISOString().slice(0,10)}T23%3A59%3A59`
+          + `&timezone=market`
+        );
         const arr = resp.data || [];
         const vals = arr.map(d=>d[field]).filter(v=>v!=null);
         return vals.length ? Math.max(...vals) : 0;
@@ -117,125 +116,142 @@
     }
 
     function updateChart() {
-      const date = dateInput.value;
-      const field = valueSelect.value;
+      const date = dateInput.value, field = valueSelect.value;
       if (!date || !field) return;
 
       loadingEl.style.display = '';
       errorEl.style.display = 'none';
-      chartContainer.style.display = 'none';
+      canvas.style.display = 'none';
 
       const isPJM = field.startsWith('load.');
       const dataset = isPJM
         ? 'pjm_standardized_hourly'
         : 'ercot_estimated_coincident_peak_load';
-      const start = `${date}T00:00:00`;
-      const end   = `${date}T23:59:59`;
-      const url = `https://api.gridstatus.io/v1/datasets/${dataset}/query`
-                + `?start_time=${encodeURIComponent(start)}`
-                + `&end_time=${encodeURIComponent(end)}`
-                + `&timezone=market`;
+      const tzLabel = isPJM ? 'ET' : 'CT';
+      const tz = isPJM ? 'America/New_York' : 'America/Chicago';
 
-      fetchJSON(url)
-        .then(resp => {
-          const data = resp.data || [];
-          const tzLabel = isPJM ? 'ET' : 'CT';
-          const tz = isPJM ? 'America/New_York' : 'America/Chicago';
-          const filtered = data.filter(d => d[field] != null);
-          if (!filtered.length) throw new Error('No data for selected date/field');
+      fetchJSON(
+        `https://api.gridstatus.io/v1/datasets/${dataset}/query`
+        + `?start_time=${encodeURIComponent(date+'T00:00:00')}`
+        + `&end_time=${encodeURIComponent(date+'T23:59:59')}`
+        + `&timezone=market`
+      )
+      .then(resp => {
+        const data = resp.data || [];
+        const filtered = data.filter(d => d[field] != null);
+        if (!filtered.length) throw new Error('No data for selected date/field');
 
-          const timeMap = {};
-          filtered.forEach(d => {
-            const dt = new Date(d.interval_end_local);
-            const label = dt.toLocaleTimeString('en-US', {
-              timeZone: tz,
-              hour12: true,
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-            timeMap[label] = d[field];
+        // build time→value map
+        const timeMap = {};
+        filtered.forEach(d => {
+          const dt = new Date(d.interval_end_local);
+          const label = dt.toLocaleTimeString('en-US', {
+            timeZone: tz,
+            hour12: true,
+            hour: '2-digit',
+            minute: '2-digit'
           });
-
-          // build categories from 00:15 to 24:00 in 15-min steps
-          const categories = [];
-          for (let i = 1; i <= 96; i++) {
-            const totalMin = i * 15;
-            const hrs = Math.floor(totalMin / 60);
-            const mins = totalMin % 60;
-            const dateObj = new Date(2020,0,1, hrs % 24, mins);
-            let label = dateObj.toLocaleTimeString('en-US', {
-              hour12: true,
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-            categories.push(label);
-          }
-
-          const values = categories.map(cat =>
-            cat in timeMap ? timeMap[cat] : null
-          );
-
-          loadingEl.style.display = 'none';
-          chartContainer.style.display = '';
-
-          const seriesName = valueSelect.selectedOptions[0].text;
-
-          if (!chart) {
-            chart = Highcharts.chart('chart-container', {
-              chart: { type: 'line' },
-              title: { text: `${seriesName} on ${date}` },
-              xAxis: {
-                categories,
-                title: { text: `Time (${tzLabel})` }
-              },
-              yAxis: {
-                title: { text: 'MW' },
-                plotLines: []
-              },
-              tooltip: {
-                formatter() {
-                  return `<b>${this.x} (interval ending)</b><br/>`
-                    + `${this.series.name}: `
-                    + Highcharts.numberFormat(this.y, 3) + ' MW';
-                }
-              },
-              series: [{ name: seriesName, data: values }],
-              credits: { enabled: false }
-            });
-          } else {
-            chart.xAxis[0].setCategories(categories, false);
-            chart.series[0].update({ name: seriesName }, false);
-            chart.series[0].setData(values, false);
-            chart.redraw();
-            chart.setTitle({ text: `${seriesName} on ${date}` });
-          }
-
-          if (includePeakCb.checked) {
-            computePeak(field, date).then(peakVal => {
-              chart.yAxis[0].removePlotLine('peak-line');
-              chart.yAxis[0].addPlotLine({
-                id: 'peak-line',
-                value: peakVal,
-                color: 'red',
-                dashStyle: 'ShortDash',
-                width: 2,
-                label: {
-                  text: `Current Peak: ${Highcharts.numberFormat(peakVal,3)} MW`,
-                  align: 'right',
-                  x: -10
-                }
-              });
-            });
-          } else {
-            chart.yAxis[0].removePlotLine('peak-line');
-          }
-        })
-        .catch(err => {
-          loadingEl.style.display = 'none';
-          chartContainer.style.display = 'none';
-          errorEl.innerText = 'Error: ' + err.message;
-          errorEl.style.display = '';
+          timeMap[label] = d[field];
         });
+
+        // generate full-day categories 00:15–24:00
+        const categories = [];
+        for (let i = 1; i <= 96; i++) {
+          const totalMin = i * 15;
+          const hrs = Math.floor(totalMin / 60);
+          const mins = totalMin % 60;
+          const dt = new Date();
+          dt.setHours(hrs % 24, mins, 0, 0);
+          const label = dt.toLocaleTimeString('en-US', {
+            timeZone: tz,
+            hour12: true,
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          categories.push(label);
+        }
+
+        const values = categories.map(cat =>
+          timeMap[cat] != null ? timeMap[cat] : null
+        );
+
+        loadingEl.style.display = 'none';
+        canvas.style.display = '';
+
+        const seriesName = valueSelect.selectedOptions[0].text;
+        const baseDataset = {
+          label: seriesName,
+          data: values,
+          borderColor: '#007bff',
+          borderWidth: 2,
+          fill: false,
+          tension: 0.3,
+          spanGaps: true
+        };
+
+        const drawChart = datasets => {
+          if (chart) {
+            chart.data.labels = categories;
+            chart.data.datasets = datasets;
+            chart.options.scales.x.title.text = `Time (${tzLabel})`;
+            chart.update();
+          } else {
+            chart = new Chart(ctx, {
+              type: 'line',
+              data: { labels: categories, datasets },
+              options: {
+                scales: {
+                  x: {
+                    title: { display: true, text: `Time (${tzLabel})` }
+                  },
+                  y: {
+                    title: { display: true, text: 'MW' }
+                  }
+                },
+                plugins: {
+                  tooltip: {
+                    callbacks: {
+                      title: items => `${items[0].label} (interval ending)`,
+                      label: ctx => `${ctx.dataset.label}: `
+                        + ctx.parsed.y.toLocaleString(undefined, {
+                            minimumFractionDigits: 3,
+                            maximumFractionDigits: 3
+                          }) + ' MW'
+                    }
+                  },
+                  legend: { display: true }
+                }
+              }
+            });
+          }
+        };
+
+        if (includePeakCb.checked) {
+          computePeak(field, date).then(peakVal => {
+            const peakDataset = {
+              label: 'Current Peak',
+              data: Array(categories.length).fill(peakVal),
+              borderColor: 'red',
+              borderWidth: 2,
+              borderDash: [6, 3],
+              pointRadius: 0,
+              fill: false
+            };
+            drawChart([baseDataset, peakDataset]);
+          }).catch(err => {
+            console.error(err);
+            drawChart([baseDataset]);
+          });
+        } else {
+          drawChart([baseDataset]);
+        }
+      })
+      .catch(err => {
+        loadingEl.style.display = 'none';
+        canvas.style.display = 'none';
+        errorEl.innerText = 'Error: ' + err.message;
+        errorEl.style.display = '';
+      });
     }
   });
   </script>
