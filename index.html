@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ERCOT Daily Line Chart</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 2rem; background: #f9f9f9; color: #333; }
+    .controls { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center; }
+    label { font-size: 0.9rem; }
+    select, input[type=date] { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
+    #loading, #error { font-style: italic; color: #666; }
+    #error { color: #c00; }
+    canvas { background: #fff; border: 1px solid #ddd; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>ERCOT Daily Line Chart</h1>
+  <div class="controls">
+    <label>
+      Select Date:
+      <input type="date" id="date-picker" />
+    </label>
+    <label>
+      Select Value:
+      <select id="value-selector">
+        <option value="internal_generation">Internal Generation (MW)</option>
+        <option value="estimated_cp_load">Estimated CP Load (MW)</option>
+        <option value="estimated_cp_load_using_gen">Estimated CP Load Using Gen (MW)</option>
+      </select>
+    </label>
+  </div>
+  <div id="loading">Loading data…</div>
+  <div id="error" style="display:none;"></div>
+  <canvas id="line-chart" width="800" height="400" style="display:none;"></canvas>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const API_KEY = 'bda3a30f30804e22a62e4637700bab54';
+      const dateInput = document.getElementById('date-picker');
+      const valueSelect = document.getElementById('value-selector');
+      const loadingEl = document.getElementById('loading');
+      const errorEl = document.getElementById('error');
+      const canvas = document.getElementById('line-chart');
+      const ctx = canvas.getContext('2d');
+      let chart;
+
+      // initialize date picker to today
+      const today = new Date().toISOString().substr(0,10);
+      dateInput.value = today;
+
+      // fetch & render whenever controls change
+      dateInput.addEventListener('change', updateChart);
+      valueSelect.addEventListener('change', updateChart);
+
+      updateChart();
+
+      function updateChart() {
+        const date = dateInput.value;
+        const field = valueSelect.value;
+
+        if (!date || !field) return;
+
+        loadingEl.style.display = '';
+        errorEl.style.display = 'none';
+        canvas.style.display = 'none';
+
+        const start = `${date}T00:00:00`;
+        const end   = `${date}T23:59:59`;
+        const url = `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query`
+                  + `?start_time=${encodeURIComponent(start)}`
+                  + `&end_time=${encodeURIComponent(end)}`
+                  + `&timezone=market`;
+
+        fetch(url, { headers: { 'x-api-key': API_KEY } })
+          .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+          .then(resp => {
+            const data = resp.data || [];
+            // filter out entries missing the selected field
+            const filtered = data.filter(d => d[field] != null);
+            if (!filtered.length) {
+              throw new Error('No data for selected date/field');
+            }
+            // sort by interval_end_local
+            filtered.sort((a,b) =>
+              new Date(a.interval_end_local) - new Date(b.interval_end_local)
+            );
+            const labels = filtered.map(d => {
+              const dt = new Date(d.interval_end_local);
+              return dt.toLocaleTimeString('en-US', {
+                timeZone: 'America/Chicago',
+                hour12: true,
+                hour: '2-digit',
+                minute: '2-digit'
+              });
+            });
+            const values = filtered.map(d => d[field]);
+
+            loadingEl.style.display = 'none';
+            canvas.style.display = '';
+
+            const datasetLabel = valueSelect.selectedOptions[0].text;
+            if (chart) {
+              chart.data.labels = labels;
+              chart.data.datasets[0].data = values;
+              chart.data.datasets[0].label = datasetLabel;
+              chart.update();
+            } else {
+              chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                  labels,
+                  datasets: [{
+                    label: datasetLabel,
+                    data: values,
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.3
+                  }]
+                },
+                options: {
+                  scales: {
+                    x: { display: true, title: { display: true, text: 'Time (CT)' } },
+                    y: { display: true, title: { display: true, text: 'MW' } }
+                  },
+                  plugins: {
+                    legend: { display: true }
+                  }
+                }
+              });
+            }
+          })
+          .catch(err => {
+            loadingEl.style.display = 'none';
+            canvas.style.display = 'none';
+            errorEl.innerText = 'Error: ' + err.message;
+            errorEl.style.display = '';
+          });
+      }
+    });
+  </script>
+</body>
+</html>
