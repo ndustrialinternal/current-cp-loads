@@ -47,6 +47,7 @@
       Include current peak
     </label>
   </div>
+
   <div id="loading">Loading data…</div>
   <div id="error" style="display:none;"></div>
   <canvas id="line-chart" width="800" height="400"></canvas>
@@ -63,8 +64,12 @@
     const ctx = canvas.getContext('2d');
     let chart;
 
+    // Initialize date picker to today
     dateInput.value = new Date().toISOString().slice(0,10);
-    [dateInput, valueSelect, includePeakCb].forEach(el => el.addEventListener('change', updateChart));
+
+    [dateInput, valueSelect, includePeakCb].forEach(el =>
+      el.addEventListener('change', updateChart)
+    );
     updateChart();
 
     async function fetchJSON(url) {
@@ -76,6 +81,7 @@
     async function computePeak(field, date) {
       const isPJM = field.startsWith('load.');
       if (isPJM) {
+        // PJM: 5th highest daily max across non-weekends (June 1–Oct 1)
         const year = new Date(date).getFullYear();
         const resp = await fetchJSON(
           `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query`
@@ -88,16 +94,15 @@
         arr.forEach(d => {
           const dt = new Date(d.interval_end_local);
           const dow = dt.getUTCDay();
-          if (dow === 0 || dow === 6) return;
+          if (dow===0||dow===6) return;
           const day = dt.toISOString().slice(0,10);
           const val = d[field];
-          if (val != null) byDay[day] = Math.max(byDay[day]||0, val);
+          if (val!=null) byDay[day] = Math.max(byDay[day]||0, val);
         });
-        const dailyMaxes = Object.values(byDay).sort((a,b)=>b-a);
-        return dailyMaxes[4] != null
-          ? dailyMaxes[4]
-          : (dailyMaxes.length ? dailyMaxes[dailyMaxes.length-1] : 0);
+        const maxes = Object.values(byDay).sort((a,b)=>b-a);
+        return maxes[4] != null ? maxes[4] : (maxes.pop()||0);
       } else {
+        // ERCOT: highest in selected month
         const dt = new Date(date);
         const month = String(dt.getMonth()+1).padStart(2,'0');
         const year = dt.getFullYear();
@@ -138,41 +143,39 @@
       )
       .then(resp => {
         const data = resp.data || [];
-        const filtered = data.filter(d => d[field] != null);
+        const filtered = data.filter(d=>d[field]!=null);
         if (!filtered.length) throw new Error('No data for selected date/field');
 
-        // build time→value map
+        // map interval_end_local → value
         const timeMap = {};
-        filtered.forEach(d => {
+        filtered.forEach(d=>{
           const dt = new Date(d.interval_end_local);
-          const label = dt.toLocaleTimeString('en-US', {
+          const label = dt.toLocaleTimeString('en-US',{
             timeZone: tz,
-            hour12: true,
-            hour: '2-digit',
-            minute: '2-digit'
+            hour12: true, hour:'2-digit', minute:'2-digit'
           });
           timeMap[label] = d[field];
         });
 
-        // generate full-day categories 00:15–24:00
+        // build full-day 15-min categories from 00:15 to 24:00 based on selected date
         const categories = [];
-        for (let i = 1; i <= 96; i++) {
-          const totalMin = i * 15;
-          const hrs = Math.floor(totalMin / 60);
-          const mins = totalMin % 60;
-          const dt = new Date();
-          dt.setHours(hrs % 24, mins, 0, 0);
-          const label = dt.toLocaleTimeString('en-US', {
+        for (let i=1; i<=96; i++){
+          const totalMin = i*15;
+          const hrs = Math.floor(totalMin/60);
+          const mins = totalMin%60;
+          const hh = String(hrs).padStart(2,'0');
+          const mm = String(mins).padStart(2,'0');
+          const iso = `${date}T${hh}:${mm}:00`;
+          const dt = new Date(iso);
+          const label = dt.toLocaleTimeString('en-US',{
             timeZone: tz,
-            hour12: true,
-            hour: '2-digit',
-            minute: '2-digit'
+            hour12: true, hour:'2-digit', minute:'2-digit'
           });
           categories.push(label);
         }
 
         const values = categories.map(cat =>
-          timeMap[cat] != null ? timeMap[cat] : null
+          cat in timeMap ? timeMap[cat] : null
         );
 
         loadingEl.style.display = 'none';
@@ -201,21 +204,16 @@
               data: { labels: categories, datasets },
               options: {
                 scales: {
-                  x: {
-                    title: { display: true, text: `Time (${tzLabel})` }
-                  },
-                  y: {
-                    title: { display: true, text: 'MW' }
-                  }
+                  x: { title: { display: true, text: `Time (${tzLabel})` } },
+                  y: { title: { display: true, text: 'MW' } }
                 },
                 plugins: {
                   tooltip: {
                     callbacks: {
                       title: items => `${items[0].label} (interval ending)`,
                       label: ctx => `${ctx.dataset.label}: `
-                        + ctx.parsed.y.toLocaleString(undefined, {
-                            minimumFractionDigits: 3,
-                            maximumFractionDigits: 3
+                        + ctx.parsed.y.toLocaleString(undefined,{
+                            minimumFractionDigits:3,maximumFractionDigits:3
                           }) + ' MW'
                     }
                   },
@@ -233,13 +231,12 @@
               data: Array(categories.length).fill(peakVal),
               borderColor: 'red',
               borderWidth: 2,
-              borderDash: [6, 3],
+              borderDash: [6,3],
               pointRadius: 0,
               fill: false
             };
             drawChart([baseDataset, peakDataset]);
-          }).catch(err => {
-            console.error(err);
+          }).catch(()=>{
             drawChart([baseDataset]);
           });
         } else {
