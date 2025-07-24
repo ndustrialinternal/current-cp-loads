@@ -66,7 +66,6 @@
 
     // Initialize date picker to today
     dateInput.value = new Date().toISOString().slice(0,10);
-
     [dateInput, valueSelect, includePeakCb].forEach(el =>
       el.addEventListener('change', updateChart)
     );
@@ -83,10 +82,10 @@
       if (isPJM) {
         const year = new Date(date).getFullYear();
         const resp = await fetchJSON(
-          `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query`
-          + `?start_time=${year}-06-01T00%3A00%3A00`
-          + `&end_time=${year}-10-01T00%3A00%3A00`
-          + `&timezone=market`
+          `https://api.gridstatus.io/v1/datasets/pjm_standardized_hourly/query` +
+          `?start_time=${year}-06-01T00%3A00%3A00` +
+          `&end_time=${year}-10-01T00%3A00%3A00` +
+          `&timezone=market`
         );
         const arr = resp.data || [];
         const byDay = {};
@@ -100,16 +99,16 @@
         const maxes = Object.values(byDay).sort((a,b)=>b-a);
         return maxes[4] != null ? maxes[4] : (maxes.pop()||0);
       } else {
-        const dt = new Date(date);
-        const month = String(dt.getMonth()+1).padStart(2,'0');
-        const year = dt.getFullYear();
-        const next = new Date(year, dt.getMonth()+1, 1);
-        const endDate = new Date(next - 1);
+        const dt = new Date(date),
+              month = String(dt.getMonth()+1).padStart(2,'0'),
+              year = dt.getFullYear(),
+              next = new Date(year, dt.getMonth()+1, 1),
+              endDate = new Date(next - 1);
         const resp = await fetchJSON(
-          `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query`
-          + `?start_time=${year}-${month}-01T00%3A00%3A00`
-          + `&end_time=${endDate.toISOString().slice(0,10)}T23%3A59%3A59`
-          + `&timezone=market`
+          `https://api.gridstatus.io/v1/datasets/ercot_estimated_coincident_peak_load/query` +
+          `?start_time=${year}-${month}-01T00%3A00%3A00` +
+          `&end_time=${endDate.toISOString().slice(0,10)}T23%3A59%3A59` +
+          `&timezone=market`
         );
         const arr = resp.data || [];
         const vals = arr.map(d=>d[field]).filter(v=>v!=null);
@@ -118,32 +117,31 @@
     }
 
     function updateChart() {
-      const date = dateInput.value, field = valueSelect.value;
+      const date = dateInput.value,
+            field = valueSelect.value;
       if (!date || !field) return;
 
       loadingEl.style.display = '';
       errorEl.style.display = 'none';
       canvas.style.display = 'none';
 
-      const isPJM = field.startsWith('load.');
-      const dataset = isPJM
-        ? 'pjm_standardized_hourly'
-        : 'ercot_estimated_coincident_peak_load';
-      const tzLabel = isPJM ? 'ET' : 'CT';
-      const tz = isPJM ? 'America/New_York' : 'America/Chicago';
+      const isPJM = field.startsWith('load.'),
+            dataset = isPJM ? 'pjm_standardized_hourly' : 'ercot_estimated_coincident_peak_load',
+            tzLabel = isPJM ? 'ET' : 'CT',
+            tz = isPJM ? 'America/New_York' : 'America/Chicago';
 
       fetchJSON(
-        `https://api.gridstatus.io/v1/datasets/${dataset}/query`
-        + `?start_time=${encodeURIComponent(date+'T00:00:00')}`
-        + `&end_time=${encodeURIComponent(date+'T23:59:59')}`
-        + `&timezone=market`
+        `https://api.gridstatus.io/v1/datasets/${dataset}/query` +
+        `?start_time=${encodeURIComponent(date+'T00:00:00')}` +
+        `&end_time=${encodeURIComponent(date+'T23:59:59')}` +
+        `&timezone=market`
       )
       .then(resp => {
-        const data = resp.data || [];
-        const filtered = data.filter(d=>d[field]!=null);
+        const data = resp.data || [],
+              filtered = data.filter(d=>d[field]!=null);
         if (!filtered.length) throw new Error('No data for selected date/field');
 
-        // build a map of "HH:MM AM/PM" → value
+        // map interval_end_local → value
         const timeMap = {};
         filtered.forEach(d=>{
           const dt = new Date(d.interval_end_local);
@@ -154,21 +152,20 @@
           timeMap[label] = d[field];
         });
 
-        // generate full-day categories 00:15–24:00 based on selected date in UTC
+        // build full-day categories from 00:15 to 24:00 on selected date
         const categories = [];
         for (let i=1; i<=96; i++){
-          const totalMin = i*15;
-          const hrs = Math.floor(totalMin/60);
-          const mins = totalMin%60;
-          const hh = String(hrs).padStart(2,'0');
-          const mm = String(mins).padStart(2,'0');
-          // treat as UTC so timezone conversion to CT/ET is correct
-          const iso = `${date}T${hh}:${mm}:00Z`;
-          const dt = new Date(iso);
-          const label = dt.toLocaleTimeString('en-US',{
-            timeZone: tz,
-            hour12: true, hour:'2-digit', minute:'2-digit'
-          });
+          const totalMin = i*15,
+                hrs = Math.floor(totalMin/60),
+                mins = totalMin%60,
+                hh = String(hrs).padStart(2,'0'),
+                mm = String(mins).padStart(2,'0'),
+                iso = `${date}T${hh}:${mm}:00Z`,  // Z for UTC baseline
+                dt = new Date(iso),
+                label = dt.toLocaleTimeString('en-US',{
+                  timeZone: tz,
+                  hour12: true, hour:'2-digit', minute:'2-digit'
+                });
           categories.push(label);
         }
 
@@ -191,10 +188,14 @@
         };
 
         function draw(datasets) {
+          const minLabel = categories[0],
+                maxLabel = categories[categories.length-1];
           if (chart) {
             chart.data.labels = categories;
             chart.data.datasets = datasets;
             chart.options.scales.x.title.text = `Time (${tzLabel})`;
+            chart.options.scales.x.min = minLabel;
+            chart.options.scales.x.max = maxLabel;
             chart.update();
           } else {
             chart = new Chart(ctx, {
@@ -202,8 +203,15 @@
               data: { labels: categories, datasets },
               options: {
                 scales: {
-                  x: { title: { display: true, text: `Time (${tzLabel})` } },
-                  y: { title: { display: true, text: 'MW' } }
+                  x: {
+                    type: 'category',
+                    min: minLabel,
+                    max: maxLabel,
+                    title: { display: true, text: `Time (${tzLabel})` }
+                  },
+                  y: {
+                    title: { display: true, text: 'MW' }
+                  }
                 },
                 plugins: {
                   tooltip: {
@@ -211,7 +219,8 @@
                       title: items => `${items[0].label} (interval ending)`,
                       label: ctx => `${ctx.dataset.label}: `
                         + ctx.parsed.y.toLocaleString(undefined,{
-                            minimumFractionDigits:3,maximumFractionDigits:3
+                            minimumFractionDigits:3,
+                            maximumFractionDigits:3
                           }) + ' MW'
                     }
                   },
