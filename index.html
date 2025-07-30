@@ -207,7 +207,7 @@
           .select(`
             interval_end_utc,
             cp,
-            internal_generation,
+            operational_load,
             dc_tie_imports,
             dc_tie_exports,
             wholesale_storage_load
@@ -246,7 +246,7 @@
                   <tr>
                     <td>${dt.toLocaleString('en-US',{timeZone:'America/Chicago'})}</td>
                     <td>${d.cp.toLocaleString(undefined,{minimumFractionDigits:3})}</td>
-                    <td>${d.internal_generation?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
+                    <td>${d.operational_load?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
                     <td>${d.dc_tie_imports?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
                     <td>${d.dc_tie_exports?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
                     <td>${d.wholesale_storage_load?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
