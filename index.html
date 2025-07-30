@@ -2,269 +2,231 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Coincident Peak Program Current Peaks</title>
+  <title>Daily Line Chart for ERCOT &amp; PJM with Monthly Thresholds (Hover Values)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; padding: 2rem; background-color: #f9f9f9; color: #333; }
-    h1 { margin-bottom: 0.5rem; }
-    h2 { margin-bottom: 1rem; font-size: 0.9rem; color: #555; }
-    h3 { margin-top: 2rem; margin-bottom: 0.5rem; }
-    section { margin-top: 2rem; padding: 1rem; background: #fff; border: 1px solid #ddd; border-radius: 4px; }
-    #loading-pjm, #loading-ercot { font-style: italic; color: #666; }
-    .error { color: #c00; margin-top: 0.5rem; }
-    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; margin-bottom: 1.5rem; }
-    th, td { padding: 0.5rem; border: 1px solid #ccc; text-align: center; }
-    th { background-color: #f0f0f0; }
-    #data-controls {
-      position: fixed; top: 1rem; right: 1rem;
-      background: #fff; border: 1px solid #ddd; border-radius:4px;
-      padding:1rem; box-shadow:0 2px 6px rgba(0,0,0,0.1); z-index:1000;
-    }
-    #data-controls h4 { margin:0 0 .5rem; font-size:1rem; }
-    #control-buttons { margin-bottom:.5rem; }
-    #control-buttons button { margin-right:.5rem; }
-    #data-controls label { display:block; margin-bottom:.25rem; cursor:pointer; }
-    #data-controls input[type="checkbox"] { margin-right:.5rem; }
+    body { font-family: Arial, sans-serif; padding: 2rem; background: #f9f9f9; color: #333; }
+    .controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    label { font-size: 0.9rem; }
+    select, input[type=date] { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
+    #loading, #error { font-style: italic; color: #666; }
+    #error { color: #c00; }
+    canvas { background: #fff; border: 1px solid #ddd; border-radius: 4px; display: none; }
   </style>
 </head>
 <body>
-  <button id="alerts-button"
-          onclick="window.location.href='https://ndustrialinternal.github.io/amp-cp-alerts/';">
-    Open Amp CP Alerts
-  </button>
+  <h1>Daily Line Chart for ERCOT &amp; PJM</h1>
 
-  <div id="data-controls" style="display:none;">
-    <h4>Select Data</h4>
-    <div id="control-buttons">
-      <button id="select-all" type="button">Select All</button>
-      <button id="clear-all"  type="button">Clear All</button>
-    </div>
-    <!-- checkboxes inserted here -->
+  <div class="controls">
+    <label>
+      Date:
+      <input type="date" id="date-picker" />
+    </label>
+    <label>
+      Data:
+      <select id="data-selector">
+        <option value="ercot">ERCOT CP</option>
+        <option value="RTO">PJM RTO</option>
+        <option value="AE">PJM AECO</option>
+        <option value="AEP">PJM AEP</option>
+        <option value="BC">PJM BGE</option>
+        <option value="COMED">PJM COMED</option>
+        <option value="DPL">PJM DPL</option>
+        <option value="PE">PJM PECO</option>
+        <option value="PS">PJM PSEG</option>
+        <option value="PL">PJM PPL</option>
+      </select>
+    </label>
+    <label>
+      <input type="checkbox" id="show-threshold" />
+      Show threshold line
+    </label>
   </div>
 
-  <!-- PJM Section -->
-  <section id="pjm-section">
-    <h1>PJM Demand Top 5 Daily Peaks by Zone (ET)</h1>
-    <div id="loading-pjm">Loading PJM data…</div>
-    <div id="error-pjm" class="error" style="display:none;"></div>
-    <div id="output-pjm" style="display:none;">
-      <div id="tables-pjm"></div>
-    </div>
-  </section>
-
-  <!-- ERCOT Monthly Section -->
-  <section id="ercot-section">
-    <h1>ERCOT Demand Top 5 Intervals per Month (CT)</h1>
-    <h2>Top 5 15‑minute intervals each month</h2>
-    <div id="loading-ercot">Loading ERCOT data…</div>
-    <div id="error-ercot" class="error" style="display:none;"></div>
-    <div id="output-ercot" style="display:none;">
-      <div id="tables-ercot"></div>
-    </div>
-  </section>
+  <div id="loading">Loading data…</div>
+  <div id="error" style="display:none;"></div>
+  <canvas id="line-chart" width="900" height="400"></canvas>
 
   <script type="module">
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
-    // ─── Supabase setup ──────────────────────────────────────────────────────
     const SUPABASE_URL      = 'https://jlmdkdeyemtbuoqzhmnk.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbWRrZGV5ZW10YnVvcXpobW5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzODczNzUsImV4cCI6MjA2ODk2MzM3NX0.D67p_so_Tkok6wCAt4_2w6xqVcrEC9wYnyohe0E7huc';
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // ─── Filters / State ─────────────────────────────────────────────────────
-    const filters = [
-      { key: 'AE',    label: 'AECO',  type: 'pjm' },
-      { key: 'AEP',   label: 'AEP',   type: 'pjm' },
-      { key: 'BC',    label: 'BGE',   type: 'pjm' },
-      { key: 'COMED', label: 'COMED', type: 'pjm' },
-      { key: 'DPL',   label: 'DPL',   type: 'pjm' },
-      { key: 'PE',    label: 'PECO',  type: 'pjm' },
-      { key: 'PS',    label: 'PSEG',  type: 'pjm' },
-      { key: 'PL',    label: 'PPL',   type: 'pjm' },
-      { key: 'ERCOT', label: 'ERCOT', type: 'ercot' },
-    ];
-    const zoneTopData = {};
+    const dateInput     = document.getElementById('date-picker');
+    const dataSelector  = document.getElementById('data-selector');
+    const showThreshold = document.getElementById('show-threshold');
+    const loadingEl     = document.getElementById('loading');
+    const errorEl       = document.getElementById('error');
+    const canvas        = document.getElementById('line-chart');
+    const ctx           = canvas.getContext('2d');
+    let chart;
 
-    // ─── Build controls ──────────────────────────────────────────────────────
-    const ctrl = document.getElementById('data-controls');
-    filters.forEach(f => {
-      const lbl = document.createElement('label');
-      const cb  = document.createElement('input');
-      cb.type    = 'checkbox';
-      cb.value   = f.key;
-      cb.checked = true;
-      cb.addEventListener('change', onFilterChange);
-      lbl.appendChild(cb);
-      lbl.appendChild(document.createTextNode(f.label));
-      ctrl.appendChild(lbl);
-    });
-    document.getElementById('select-all').onclick = () => {
-      ctrl.querySelectorAll('input').forEach(cb => cb.checked = true);
-      onFilterChange();
-    };
-    document.getElementById('clear-all').onclick = () => {
-      ctrl.querySelectorAll('input').forEach(cb => cb.checked = false);
-      onFilterChange();
-    };
+    dateInput.value = new Date().toISOString().slice(0,10);
+    [dateInput, dataSelector, showThreshold].forEach(el =>
+      el.addEventListener('change', updateChart)
+    );
 
-    function onFilterChange() {
-      const checked = Array.from(ctrl.querySelectorAll('input:checked')).map(cb => cb.value);
-      const showPJM   = checked.some(k => filters.find(f => f.key===k).type==='pjm');
-      const showERCOT = checked.includes('ERCOT');
-
-      document.getElementById('pjm-section').style.display   = showPJM   ? '' : 'none';
-      document.getElementById('output-pjm').style.display    = showPJM   ? '' : 'none';
-      document.getElementById('ercot-section').style.display = showERCOT ? '' : 'none';
-      document.getElementById('output-ercot').style.display  = showERCOT ? '' : 'none';
-
-      renderPJM(checked.filter(k => filters.find(f => f.key===k).type==='pjm'));
+    function fmtTime(iso, tz, opts) {
+      return new Date(iso).toLocaleTimeString('en-US', { timeZone: tz, ...opts });
     }
 
-    // ─── Render PJM table ─────────────────────────────────────────────────────
-    function renderPJM(zoneKeys) {
-      const container = document.getElementById('tables-pjm');
-      container.innerHTML = '';
-      zoneKeys.forEach(key => {
-        const top = zoneTopData[key] || [];
-        if (!top.length) return;
+    async function updateChart() {
+      const date    = dateInput.value;
+      const sel     = dataSelector.value;
+      const include = showThreshold.checked;
+      if (!date) return;
 
-        const zone = filters.find(f => f.key === key);
-        const h3 = document.createElement('h3');
-        h3.textContent = zone.label;
-        container.appendChild(h3);
+      loadingEl.style.display = '';
+      errorEl.style.display   = 'none';
+      canvas.style.display    = 'none';
 
-        const tbl = document.createElement('table');
-        tbl.innerHTML = `
-          <thead>
-            <tr>
-              <th>Date (ET)</th>
-              <th>Day</th>
-              <th>End Time (ET)</th>
-              <th>Load (MW)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${top.map(r => `
-              <tr>
-                <td>${r.date}</td>
-                <td>${r.day}</td>
-                <td>${r.endTime}</td>
-                <td>${r.value.toLocaleString(undefined,{minimumFractionDigits:3})}</td>
-              </tr>
-            `).join('')}
-          </tbody>`;
-        container.appendChild(tbl);
-      });
+      const isPJM   = sel !== 'ercot';
+      const table   = isPJM ? 'pjm_hourly_load_metered' : 'gridstatus_ercot_15min';
+      const tsCol   = isPJM ? 'interval_start_utc'     : 'interval_end_utc';
+      const valCol  = isPJM ? 'mw'                     : 'cp';
+      const tz      = isPJM ? 'America/New_York'       : 'America/Chicago';
+      const offsetH = isPJM ? 4 : 5;
+      const offsetMs = offsetH * 3600e3;
+
+      const dayStartLocal = Date.parse(`${date}T00:00:00Z`);
+      const dayEndLocal   = Date.parse(`${date}T23:59:59Z`);
+      const startUTC = new Date(dayStartLocal + offsetMs).toISOString();
+      const endUTC   = new Date(dayEndLocal + offsetMs).toISOString();
+
+      try {
+        let q = supabase
+          .from(table)
+          .select(`${tsCol}, ${valCol}`)
+          .gte(tsCol, startUTC)
+          .lte(tsCol, endUTC)
+          .order(tsCol, { ascending: true });
+        if (isPJM) q = q.eq('zone', sel);
+
+        const { data, error } = await q;
+        if (error) throw error;
+
+        const labelsRaw = data.map(r =>
+          fmtTime(r[tsCol], tz, { hour12:true, hour:'2-digit', minute:'2-digit' })
+        );
+        const categories = [...new Set(labelsRaw)];
+        const values = categories.map(lbl =>
+          (data.find(r =>
+            fmtTime(r[tsCol], tz, { hour12:true, hour:'2-digit', minute:'2-digit' }) === lbl
+          ) || {})[valCol] ?? null
+        );
+
+        const datasets = [{
+          label: isPJM
+            ? `PJM ${sel} Load (MW)`
+            : `ERCOT CP (MW)`,
+          data: values,
+          tension: 0.2,
+          fill: false,
+          borderWidth: 2,
+          pointHoverRadius: 0  // hide hover point for main series
+        }];
+
+        if (include) {
+          if (isPJM) {
+            const seasonStartLocal = Date.parse(`2025-06-01T00:00:00Z`);
+            const seasonEndLocal   = Date.parse(`2025-10-01T00:00:00Z`);
+            const seasonStartUTC   = new Date(seasonStartLocal + offsetMs).toISOString();
+            const seasonEndUTC     = new Date(seasonEndLocal + offsetMs - 1).toISOString();
+
+            const { data: peaks, error: peakErr } = await supabase
+              .from('pjm_peaks')
+              .select('mw')
+              .eq('zone', sel)
+              .gte('interval_start_utc', seasonStartUTC)
+              .lte('interval_start_utc', seasonEndUTC)
+              .order('mw', { ascending: false })
+              .range(4,4);
+            if (peakErr) throw peakErr;
+            const threshold = peaks[0]?.mw || 0;
+
+            datasets.push({
+              label: 'PJM 5ᵗʰ‑highest daily peak',
+              data: categories.map(() => threshold),
+              borderColor: 'red',
+              borderDash: [6,3],
+              pointRadius: 0,
+              pointHoverRadius: 6,    // show hover dot
+              fill: false
+            });
+          } else {
+            const [y, m] = date.split('-').map(Number);
+            const monthStartLocal = Date.parse(`${y}-${String(m).padStart(2,'0')}-01T00:00:00Z`);
+            const monthEndLocal   = Date.parse(`${y}-${String(m).padStart(2,'0')}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}T23:59:59Z`);
+            const monthStartUTC   = new Date(monthStartLocal + offsetMs).toISOString();
+            const monthEndUTC     = new Date(monthEndLocal + offsetMs).toISOString();
+
+            const { data: peaks, error: peakErr } = await supabase
+              .from('ercot_peaks')
+              .select('cp')
+              .gte('interval_end_utc', monthStartUTC)
+              .lte('interval_end_utc', monthEndUTC)
+              .order('cp', { ascending: false })
+              .limit(1);
+            if (peakErr) throw peakErr;
+            const threshold = peaks[0]?.cp || 0;
+
+            datasets.push({
+              label: 'ERCOT month‑to‑date max',
+              data: categories.map(() => threshold),
+              borderColor: 'red',
+              borderDash: [6,3],
+              pointRadius: 0,
+              pointHoverRadius: 6,   // show hover dot
+              fill: false
+            });
+          }
+        }
+
+        // Chart.js options with index-hover mode
+        const options = {
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+              callbacks: {
+                title: items => `Interval ending: ${items[0].label}`,
+                label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toLocaleString()} MW`
+              }
+            }
+          },
+          scales: {
+            x: { title: { display:true, text:'Time' } },
+            y: { title: { display:true, text:'MW' } }
+          }
+        };
+
+        if (chart) {
+          chart.data.labels   = categories;
+          chart.data.datasets = datasets;
+          chart.options       = options;
+          chart.update();
+          canvas.style.display = 'block';
+        } else {
+          canvas.style.display = 'block';
+          chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: categories, datasets },
+            options
+          });
+        }
+
+        loadingEl.style.display = 'none';
+      } catch (err) {
+        loadingEl.style.display = 'none';
+        errorEl.textContent     = 'Error: ' + err.message;
+        errorEl.style.display   = '';
+      }
     }
 
-    // ─── PJM: fetch from pjm_peaks ────────────────────────────────────────────
-    (async function fetchPJM() {
-      try {
-        const { data, error } = await supabase
-          .from('pjm_peaks')
-          .select('interval_start_utc, zone, mw');
-        if (error) throw error;
-
-        filters.filter(f => f.type==='pjm').forEach(({ key }) => {
-          const rows = data.filter(r => r.zone === key);
-          zoneTopData[key] = rows.map(r => {
-            const dt = new Date(r.interval_start_utc);
-            return {
-              date: dt.toLocaleDateString('en-US', {
-                timeZone: 'America/New_York',
-                year: 'numeric', month: '2-digit', day: '2-digit'
-              }),
-              day: dt.toLocaleDateString('en-US', {
-                timeZone: 'America/New_York',
-                weekday: 'short'
-              }),
-              endTime: dt.toLocaleTimeString('en-US', {
-                timeZone: 'America/New_York',
-                hour12: true,
-                hour: '2-digit',
-                minute: '2-digit'
-              }),
-              value: r.mw
-            };
-          });
-        });
-
-        document.getElementById('loading-pjm').style.display = 'none';
-        ctrl.style.display = '';
-        onFilterChange();
-      } catch (e) {
-        document.getElementById('loading-pjm').style.display = 'none';
-        const err = document.getElementById('error-pjm');
-        err.textContent = 'Error: ' + e.message;
-        err.style.display = '';
-      }
-    })();
-
-    // ─── ERCOT: fetch from ercot_peaks ────────────────────────────────────────
-    (async function fetchERCOT() {
-      try {
-        const { data, error } = await supabase
-          .from('ercot_peaks')
-          .select(`
-            interval_end_utc,
-            cp,
-            operational_load,
-            dc_tie_imports,
-            dc_tie_exports,
-            wholesale_storage_load
-          `);
-        if (error) throw error;
-
-        const byMonth = {};
-        data.forEach(d => {
-          const dt = new Date(d.interval_end_utc);
-          const month = dt.toLocaleString('en-US',{
-            timeZone:'America/Chicago',
-            year:'numeric', month:'long'
-          });
-          (byMonth[month] ||= []).push(d);
-        });
-
-        const cont = document.getElementById('tables-ercot');
-        Object.entries(byMonth).forEach(([month, arr]) => {
-          const top5 = arr.slice(0,5);
-          if (!top5.length) return;
-          const h3 = document.createElement('h3'); h3.textContent = month;
-          cont.appendChild(h3);
-
-          const tbl = document.createElement('table');
-          tbl.innerHTML = `
-            <thead>
-              <tr>
-                <th>End Time (CT)</th><th>CP Load (MW)</th>
-                <th>Int. Gen</th><th>DC In</th><th>DC Out</th><th>WSL</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${top5.map(d => {
-                const dt = new Date(d.interval_end_utc);
-                return `
-                  <tr>
-                    <td>${dt.toLocaleString('en-US',{timeZone:'America/Chicago'})}</td>
-                    <td>${d.cp.toLocaleString(undefined,{minimumFractionDigits:3})}</td>
-                    <td>${d.operational_load?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
-                    <td>${d.dc_tie_imports?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
-                    <td>${d.dc_tie_exports?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
-                    <td>${d.wholesale_storage_load?.toLocaleString(undefined,{minimumFractionDigits:3})||''}</td>
-                  </tr>`;
-              }).join('')}
-            </tbody>`;
-          cont.appendChild(tbl);
-        });
-
-        document.getElementById('loading-ercot').style.display = 'none';
-        document.getElementById('output-ercot').style.display = '';
-      } catch (e) {
-        document.getElementById('loading-ercot').style.display = 'none';
-        const err = document.getElementById('error-ercot');
-        err.textContent = 'Error: ' + e.message;
-        err.style.display = '';
-      }
-    })();
+    updateChart();
   </script>
 </body>
 </html>
