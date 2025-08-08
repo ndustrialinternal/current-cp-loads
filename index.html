@@ -5,95 +5,316 @@
   <title>Daily Line Chart for ERCOT &amp; PJM with Monthly Thresholds (Hover Values)</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; padding: 2rem; background: #f9f9f9; color: #333; }
-    .controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
-    label { font-size: 0.9rem; }
-    select, input[type=date] { padding: 0.25rem 0.5rem; font-size: 0.9rem; }
-    #loading, #error { font-style: italic; color: #666; }
-    #error { color: #c00; }
-    canvas { background: #fff; border: 1px solid #ddd; border-radius: 4px; display: none; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body { 
+      font-family: Arial, sans-serif; 
+      background-color: #f5f5f5; 
+      color: #333;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Navigation Sidebar */
+    .sidebar {
+      width: 250px;
+      background: linear-gradient(135deg, #8DB843 0%, #6B9532 100%);
+      color: white;
+      position: fixed;
+      height: 100vh;
+      left: 0;
+      top: 0;
+      box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+      z-index: 1000;
+      overflow-y: auto;
+    }
+
+    .sidebar-header {
+      padding: 1.5rem 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.1);
+    }
+
+    .sidebar-title {
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: white;
+      text-decoration: none;
+    }
+
+    .nav-menu {
+      padding: 1rem 0;
+    }
+
+    .nav-item {
+      display: block;
+      padding: 0.75rem 1.5rem;
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      transition: all 0.3s ease;
+      border-left: 3px solid transparent;
+    }
+
+    .nav-item:hover {
+      background: rgba(255,255,255,0.1);
+      color: white;
+      border-left-color: #fff;
+    }
+
+    .nav-item.active {
+      background: rgba(255,255,255,0.15);
+      color: white;
+      border-left-color: #fff;
+      font-weight: 500;
+    }
+
+    /* Main Content */
+    .main-content {
+      margin-left: 250px;
+      padding: 2rem;
+      width: calc(100% - 250px);
+    }
+
+    /* Controls Section */
+    .controls-section {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .controls {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .control-group label {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #495057;
+    }
+
+    .control-input {
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      background: #fff;
+      color: #495057;
+      transition: border-color 0.2s ease;
+    }
+
+    .control-input:focus {
+      outline: none;
+      border-color: #8DB843;
+      box-shadow: 0 0 0 2px rgba(141, 184, 67, 0.1);
+    }
+
+    .checkbox-control {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .checkbox-control input[type="checkbox"] {
+      accent-color: #8DB843;
+      cursor: pointer;
+    }
+
+    .checkbox-control label {
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #495057;
+    }
+
+    /* Chart Container */
+    .chart-container {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      color: #495057;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+
+    #loading, #error { 
+      font-style: italic; 
+      color: #6c757d;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    #error { 
+      color: #D63031;
+      background: #fff5f5;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
+      margin: 1rem 0;
+    }
+
+    canvas { 
+      background: #fff; 
+      border-radius: 6px;
+      display: none;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    /* Mobile responsiveness */
+    @media (max-width: 768px) {
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+      }
+      
+      .main-content {
+        margin-left: 0;
+        width: 100%;
+      }
+      
+      .controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+      }
+      
+      .control-group {
+        width: 100%;
+      }
+      
+      .chart-container {
+        min-height: 400px;
+      }
+      
+      .chart-wrapper {
+        height: 350px;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1>Daily Line Chart for ERCOT &amp; PJM</h1>
+  <!-- Left Navigation Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <a href="#" class="sidebar-title">CP Dashboard</a>
+    </div>
+    <div class="nav-menu">
+      <a href="https://ndustrialinternal.github.io/amp-cp-alerts/" class="nav-item">CP Predictions</a>
+      <a href="https://ndustrialinternal.github.io/cp-peaks/" class="nav-item">CP Peaks</a>
+      <a href="https://ndustrialinternal.github.io/current-cp-loads/" class="nav-item active">Load Profiles</a>
+      <a href="https://ndustrialinternal.github.io/cp-pred-analysis/" class="nav-item">Prediction Analytics</a>
+    </div>
+  </nav>
 
-  <div class="controls">
-    <label>
-      Date:
-      <input type="date" id="date-picker" />
-    </label>
-    <label>
-      Data:
-      <select id="data-selector">
-        <option value="ercot">ERCOT CP</option>
-        <option value="RTO">PJM RTO</option>
-        <option value="AE">PJM AECO</option>
-        <option value="AEP">PJM AEP</option>
-        <option value="BC">PJM BGE</option>
-        <option value="COMED">PJM COMED</option>
-        <option value="DPL">PJM DPL</option>
-        <option value="PE">PJM PECO</option>
-        <option value="PS">PJM PSEG</option>
-        <option value="PL">PJM PPL</option>
-      </select>
-    </label>
-    <label>
-      <input type="checkbox" id="show-threshold" />
-      Show threshold line
-    </label>
+  <!-- Main Content -->
+  <div class="main-content">
+    <h1>Daily Line Chart for ERCOT &amp; PJM</h1>
+
+    <div class="controls-section">
+      <div class="controls">
+        <div class="control-group">
+          <label for="date-picker">Date</label>
+          <input type="date" id="date-picker" class="control-input" />
+        </div>
+        
+        <div class="control-group">
+          <label for="data-selector">Data Source</label>
+          <select id="data-selector" class="control-input">
+            <option value="ercot">ERCOT CP</option>
+            <option value="RTO">PJM RTO</option>
+            <option value="AE">PJM AECO</option>
+            <option value="AEP">PJM AEP</option>
+            <option value="BC">PJM BGE</option>
+            <option value="COMED">PJM COMED</option>
+            <option value="DPL">PJM DPL</option>
+            <option value="PE">PJM PECO</option>
+            <option value="PS">PJM PSEG</option>
+            <option value="PL">PJM PPL</option>
+          </select>
+        </div>
+        
+        <div class="checkbox-control">
+          <input type="checkbox" id="show-threshold" />
+          <label for="show-threshold">Show threshold line</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-container">
+      <div id="loading">Loading data…</div>
+      <div id="error" style="display:none;"></div>
+      <div class="chart-wrapper">
+        <canvas id="line-chart"></canvas>
+      </div>
+    </div>
   </div>
-
-  <div id="loading">Loading data…</div>
-  <div id="error" style="display:none;"></div>
-  <canvas id="line-chart" width="900" height="400"></canvas>
 
   <script type="module">
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
-    const SUPABASE_URL      = 'https://jlmdkdeyemtbuoqzhmnk.supabase.co';
+    const SUPABASE_URL = 'https://jlmdkdeyemtbuoqzhmnk.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsbWRrZGV5ZW10YnVvcXpobW5rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzODczNzUsImV4cCI6MjA2ODk2MzM3NX0.D67p_so_Tkok6wCAt4_2w6xqVcrEC9wYnyohe0E7huc';
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    const dateInput     = document.getElementById('date-picker');
-    const dataSelector  = document.getElementById('data-selector');
+    const dateInput = document.getElementById('date-picker');
+    const dataSelector = document.getElementById('data-selector');
     const showThreshold = document.getElementById('show-threshold');
-    const loadingEl     = document.getElementById('loading');
-    const errorEl       = document.getElementById('error');
-    const canvas        = document.getElementById('line-chart');
-    const ctx           = canvas.getContext('2d');
+    const loadingEl = document.getElementById('loading');
+    const errorEl = document.getElementById('error');
+    const canvas = document.getElementById('line-chart');
+    const ctx = canvas.getContext('2d');
     let chart;
 
     dateInput.value = new Date().toISOString().slice(0,10);
-    [dateInput, dataSelector, showThreshold].forEach(el =>
-      el.addEventListener('change', updateChart)
-    );
 
     function fmtTime(iso, tz, opts) {
       return new Date(iso).toLocaleTimeString('en-US', { timeZone: tz, ...opts });
     }
 
     async function updateChart() {
-      const date    = dateInput.value;
-      const sel     = dataSelector.value;
+      const date = dateInput.value;
+      const sel = dataSelector.value;
       const include = showThreshold.checked;
       if (!date) return;
 
       loadingEl.style.display = '';
-      errorEl.style.display   = 'none';
-      canvas.style.display    = 'none';
+      errorEl.style.display = 'none';
+      canvas.style.display = 'none';
 
-      const isPJM   = sel !== 'ercot';
-      const table   = isPJM ? 'pjm_hourly_load_metered' : 'gridstatus_ercot_15min';
-      const tsCol   = isPJM ? 'interval_start_utc'     : 'interval_end_utc';
-      const valCol  = isPJM ? 'mw'                     : 'cp';
-      const tz      = isPJM ? 'America/New_York'       : 'America/Chicago';
+      const isPJM = sel !== 'ercot';
+      const table = isPJM ? 'pjm_hourly_load_metered' : 'gridstatus_ercot_15min';
+      const tsCol = isPJM ? 'interval_start_utc' : 'interval_end_utc';
+      const valCol = isPJM ? 'mw' : 'cp';
+      const tz = isPJM ? 'America/New_York' : 'America/Chicago';
       const offsetH = isPJM ? 4 : 5;
       const offsetMs = offsetH * 3600e3;
 
       const dayStartLocal = Date.parse(`${date}T00:00:00Z`);
-      const dayEndLocal   = Date.parse(`${date}T23:59:59Z`);
+      const dayEndLocal = Date.parse(`${date}T23:59:59Z`);
       const startUTC = new Date(dayStartLocal + offsetMs).toISOString();
-      const endUTC   = new Date(dayEndLocal + offsetMs).toISOString();
+      const endUTC = new Date(dayEndLocal + offsetMs).toISOString();
 
       try {
         let q = supabase
@@ -118,22 +339,22 @@
         );
 
         const datasets = [{
-          label: isPJM
-            ? `PJM ${sel} Load (MW)`
-            : `ERCOT CP (MW)`,
+          label: isPJM ? `PJM ${sel} Load (MW)` : `ERCOT CP (MW)`,
           data: values,
           tension: 0.2,
           fill: false,
           borderWidth: 2,
-          pointHoverRadius: 0  // hide hover point for main series
+          borderColor: '#8DB843',
+          backgroundColor: 'rgba(141, 184, 67, 0.1)',
+          pointHoverRadius: 0
         }];
 
         if (include) {
           if (isPJM) {
             const seasonStartLocal = Date.parse(`2025-06-01T00:00:00Z`);
-            const seasonEndLocal   = Date.parse(`2025-10-01T00:00:00Z`);
-            const seasonStartUTC   = new Date(seasonStartLocal + offsetMs).toISOString();
-            const seasonEndUTC     = new Date(seasonEndLocal + offsetMs - 1).toISOString();
+            const seasonEndLocal = Date.parse(`2025-10-01T00:00:00Z`);
+            const seasonStartUTC = new Date(seasonStartLocal + offsetMs).toISOString();
+            const seasonEndUTC = new Date(seasonEndLocal + offsetMs - 1).toISOString();
 
             const { data: peaks, error: peakErr } = await supabase
               .from('pjm_peaks')
@@ -147,20 +368,20 @@
             const threshold = peaks[0]?.mw || 0;
 
             datasets.push({
-              label: 'PJM 5ᵗʰ‑highest daily peak',
+              label: 'PJM 5ᵗʰ‑highest daily peak',
               data: categories.map(() => threshold),
-              borderColor: 'red',
+              borderColor: '#D63031',
               borderDash: [6,3],
               pointRadius: 0,
-              pointHoverRadius: 6,    // show hover dot
+              pointHoverRadius: 6,
               fill: false
             });
           } else {
             const [y, m] = date.split('-').map(Number);
             const monthStartLocal = Date.parse(`${y}-${String(m).padStart(2,'0')}-01T00:00:00Z`);
-            const monthEndLocal   = Date.parse(`${y}-${String(m).padStart(2,'0')}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}T23:59:59Z`);
-            const monthStartUTC   = new Date(monthStartLocal + offsetMs).toISOString();
-            const monthEndUTC     = new Date(monthEndLocal + offsetMs).toISOString();
+            const monthEndLocal = Date.parse(`${y}-${String(m).padStart(2,'0')}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}T23:59:59Z`);
+            const monthStartUTC = new Date(monthStartLocal + offsetMs).toISOString();
+            const monthEndUTC = new Date(monthEndLocal + offsetMs).toISOString();
 
             const { data: peaks, error: peakErr } = await supabase
               .from('ercot_peaks')
@@ -175,16 +396,15 @@
             datasets.push({
               label: 'ERCOT month‑to‑date max',
               data: categories.map(() => threshold),
-              borderColor: 'red',
+              borderColor: '#D63031',
               borderDash: [6,3],
               pointRadius: 0,
-              pointHoverRadius: 6,   // show hover dot
+              pointHoverRadius: 6,
               fill: false
             });
           }
         }
 
-        // Chart.js options with index-hover mode
         const options = {
           interaction: { mode: 'index', intersect: false },
           plugins: {
@@ -193,20 +413,28 @@
               intersect: false,
               callbacks: {
                 title: items => `Interval ending: ${items[0].label}`,
-                label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toLocaleString()} MW`
+                label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toLocaleString()} MW`
               }
             }
           },
           scales: {
-            x: { title: { display:true, text:'Time' } },
-            y: { title: { display:true, text:'MW' } }
-          }
+            x: { 
+              title: { display:true, text:'Time' },
+              grid: { color: 'rgba(141, 184, 67, 0.1)' }
+            },
+            y: { 
+              title: { display:true, text:'MW' },
+              grid: { color: 'rgba(141, 184, 67, 0.1)' }
+            }
+          },
+          responsive: true,
+          maintainAspectRatio: false
         };
 
         if (chart) {
-          chart.data.labels   = categories;
+          chart.data.labels = categories;
           chart.data.datasets = datasets;
-          chart.options       = options;
+          chart.options = options;
           chart.update();
           canvas.style.display = 'block';
         } else {
@@ -221,11 +449,17 @@
         loadingEl.style.display = 'none';
       } catch (err) {
         loadingEl.style.display = 'none';
-        errorEl.textContent     = 'Error: ' + err.message;
-        errorEl.style.display   = '';
+        errorEl.textContent = 'Error: ' + err.message;
+        errorEl.style.display = '';
       }
     }
 
+    // Set up event listeners and initialize
+    dateInput.addEventListener('change', updateChart);
+    dataSelector.addEventListener('change', updateChart);
+    showThreshold.addEventListener('change', updateChart);
+    
+    // Load initial chart
     updateChart();
   </script>
 </body>
